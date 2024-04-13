@@ -5,6 +5,12 @@
 # Dataset: https://think.cs.vt.edu/corgis/datasets/json/airlines/airlines.json
 
 # TODO: acquire data from internet
+import requests, json
+
+data_endpoint = 'https://think.cs.vt.edu/corgis/datasets/json/airlines/airlines.json'
+
+unstructured_data = requests.get(data_endpoint)
+json_data = unstructured_data.json()
 
 # TODO: connect to DB
 
