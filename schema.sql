@@ -1,6 +1,12 @@
 use airportdata;
 
 DROP TABLE IF EXISTS airports;
+CREATE TABLE airports {
+    Code varchar(3) not null primary key,
+    Name varchar(255)
+};use airportdata;
+
+DROP TABLE IF EXISTS airports;
 CREATE TABLE airports (
     code VARCHAR(3) not null primary key,
     name VARCHAR(255)
