@@ -9,6 +9,7 @@ import psycopg2
 import psycopg2.extras
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 data_empty = False
 
@@ -80,6 +81,7 @@ def populate_data():
 # TODO: perform analysis on data using DB
 def analyze_data():
     # do analytics
+    # find overall worst and best delay and cancellation rates by month and airport 
     cancelled_rates = {}
     delayed_rates = {}
     cursor.execute("SELECT airport_code, time_label, flights_cancelled, flights_delayed, flights_total FROM statistics ORDER BY flights_cancelled DESC")
@@ -98,6 +100,67 @@ def analyze_data():
     max_d_airport = list(delayed_rates.keys())[idx]
     print(max_d_airport)
     print("Max delay rate was "+ str(max(drs))+ "%")
+    idx = np.argmin(crs)
+    min_c_airport = list(cancelled_rates.keys())[idx]
+    print(min_c_airport)
+    print("Min cancellation rate was "+ str(min(crs))+ "%")
+    idx = np.argmin(drs)
+    min_d_airport = list(delayed_rates.keys())[idx]
+    print(min_d_airport)
+    print("Min delay rate was "+ str(min(drs))+ "%")
+    cursor.execute(f"SELECT * FROM statistics WHERE airport_code LIKE '{min_c_airport[0:3]}' AND time_label LIKE '{min_c_airport[4:]}'")
+    stats = cursor.fetchone()
+    print(stats['flights_cancelled'])
+    print(stats['flights_total'])
+
+    # create histogram of delays and cancellations by month across all airports in a selected year
+    year = 2012
+    cursor.execute(f"""SELECT airport_code, time_label, flights_cancelled, flights_delayed FROM statistics JOIN time on statistics.time_label = time.label WHERE time.year = {year}""")
+    stats = cursor.fetchall()
+    dels = {}
+    cancels = {}
+    for stat in stats:
+        if stat['time_label'] not in dels:
+            dels[stat['time_label']] = stat['flights_delayed']
+        else:
+            dels[stat['time_label']] += stat['flights_delayed']
+        if stat['time_label'] not in cancels:
+            cancels[stat['time_label']] = stat['flights_cancelled']
+        else:
+            cancels[stat['time_label']] += stat['flights_cancelled']
+    # make dicts into lists to be put into grouped bar chart
+    labels = list(dels.keys())
+    bars = {
+        "Delays": list(dels.values()),
+        "Cancellations": list(cancels.values())
+    }
+    x = np.arange(len(labels))  # the label locations
+    width = 0.25  # the width of the bars
+    multiplier = 0
+
+    fig, ax = plt.subplots(layout='constrained')
+
+    for attribute, measurement in bars.items():
+        offset = width * multiplier
+        rects = ax.bar(x + offset, measurement, width, label=attribute)
+        ax.bar_label(rects, padding=3)
+        multiplier += 1
+    
+    # Add some text for labels, title and custom x-axis tick labels, etc.
+    ax.set_ylabel('Number of delayed/cancelled flights')
+    ax.set_title('Delays and Cancellations per Month')
+    ax.set_xticks(x + width, labels)
+    ax.legend(loc='upper left')
+    ax.set_ylim(0, max(max(bars['Delays']), max(bars['Cancellations']))+ 1000)
+
+    plt.show()
+
+
+        
+
+
+
+
 
 
 # TODO: connect to DB
