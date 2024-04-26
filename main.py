@@ -10,6 +10,7 @@ import psycopg2.extras
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import stats
 
 data_empty = False
 
@@ -75,16 +76,11 @@ def populate_data():
         # Commit the transaction
         connection.commit()
 
-
-
-
-# TODO: perform analysis on data using DB
-def analyze_data():
-    # do analytics
-    # find overall worst and best delay and cancellation rates by month and airport 
+def get_extreme_rates():
+    # find overall worst and best delay and cancellation rates by month and airport
     cancelled_rates = {}
     delayed_rates = {}
-    cursor.execute("SELECT airport_code, time_label, flights_cancelled, flights_delayed, flights_total FROM statistics ORDER BY flights_cancelled DESC")
+    cursor.execute("SELECT airport_code, time_label, flights_cancelled, flights_delayed, flights_total FROM statistics")
     result = cursor.fetchall()
     for res in result:
         key = f"{res['airport_code']} {res['time_label']}"
@@ -113,8 +109,7 @@ def analyze_data():
     print(stats['flights_cancelled'])
     print(stats['flights_total'])
 
-    # create histogram of delays and cancellations by month across all airports in a selected year
-    year = 2012
+def plot_flight_data_by_year(year):
     cursor.execute(f"""SELECT airport_code, time_label, flights_cancelled, flights_delayed FROM statistics JOIN time on statistics.time_label = time.label WHERE time.year = {year}""")
     stats = cursor.fetchall()
     dels = {}
@@ -148,18 +143,141 @@ def analyze_data():
     
     # Add some text for labels, title and custom x-axis tick labels, etc.
     ax.set_ylabel('Number of delayed/cancelled flights')
-    ax.set_title('Delays and Cancellations per Month')
+    ax.set_title(f'Delays and Cancellations per Month in {year}')
     ax.set_xticks(x + width, labels)
     ax.legend(loc='upper left')
     ax.set_ylim(0, max(max(bars['Delays']), max(bars['Cancellations']))+ 1000)
 
     plt.show()
 
+def plot_flight_data_by_month(month):
+    cursor.execute(f"""SELECT airport_code, time_label, flights_cancelled, flights_delayed, time.year FROM statistics JOIN time on statistics.time_label = time.label WHERE time.month = {month}""")
+    statistics = cursor.fetchall()
+    dels = {}
+    cancels = {}
+    for stat in statistics:
+        if stat['year'] not in dels:
+            dels[stat['year']] = stat['flights_delayed']
+        else:
+            dels[stat['year']] += stat['flights_delayed']
+        if stat['year'] not in cancels:
+            cancels[stat['year']] = stat['flights_cancelled']
+        else:
+            cancels[stat['year']] += stat['flights_cancelled']
+    # make dicts into lists to be put into grouped bar chart
+    labels = list(dels.keys())
+    bars = {
+        "Delays": list(dels.values()),
+        "Cancellations": list(cancels.values())
+    }
+    x = np.arange(len(labels))  # the label locations
+    width = 0.25  # the width of the bars
+    multiplier = 0
 
-        
+    fig, ax = plt.subplots(layout='constrained')
+
+    for attribute, measurement in bars.items():
+        offset = width * multiplier
+        rects = ax.bar(x + offset, measurement, width, label=attribute)
+        ax.bar_label(rects, padding=3)
+        multiplier += 1
+    
+    # Add some text for labels, title and custom x-axis tick labels, etc.
+    ax.set_ylabel('Number of delayed/cancelled flights')
+    ax.set_xlabel('Year')
+    ax.set_title('Delays and Cancellations in December by Year')
+    ax.set_xticks(x + width, labels)
+    ax.legend(loc='upper left')
+    ax.set_ylim(0, max(max(bars['Delays']), max(bars['Cancellations']))+ 1000)
+
+    plt.show()
+
+def best_and_worst_airports():
+    # show non-on-time flights by airport
+    cursor.execute(f"""SELECT airport_code, SUM(flights_cancelled) as cancels, SUM(flights_delayed) as delays, SUM(flights_total) as total FROM statistics GROUP BY airport_code ORDER BY airport_code ASC""")
+    airport_data = cursor.fetchall()
+    airport_dict = {}
+    for airport in airport_data:
+        airport_dict[airport['airport_code']] = (airport['cancels'] + airport['delays']) / airport['total']
+    rates = list(airport_dict.values())
+    average_rate = np.average(rates)
+    worst_airport = list(airport_dict.keys())[np.argmax(rates)]
+    best_airport = list(airport_dict.keys())[np.argmin(rates)]
+    print("The airport with the lowest rate of on-time flights is: " + worst_airport + " with a rate of " + "{:.2%}".format(1-max(rates)) + " of flights on time.")
+    print("The airport with the highest rate of on-time flights is: " + best_airport + " with a rate of " + "{:.2%}".format(1-min(rates)) + " of flights on time.")
+    print("The average on-time rate across all airports is "+ "{:.2%}".format(1-average_rate))
+
+def average_delay_times():
+    query = """
+        select sum(delays_carrier) as delays_carrier,
+        sum(delays_late_aircraft) as delays_late_aircraft,
+        sum(delays_national_aviation_system) as delays_national_aviation_system,
+        sum(delays_security) as delays_security,
+        sum(delays_weather) as delays_weather,
+        sum(minutes_delayed_carrier) as minutes_delayed_carrier,
+        sum(minutes_delayed_late_aircraft) as minutes_delayed_late_aircraft,
+        sum(minutes_delayed_national_aviation_system) as minutes_delayed_national_aviation_system,
+        sum(minutes_delayed_security) as minutes_delayed_security,
+        sum(minutes_delayed_weather) as minutes_delayed_weather
+        from statistics;
+        """
+    cursor.execute(query)
+    delay_totals = cursor.fetchone()
+    print("The average time a flight is late for carrier delays is "+ "{:.2f}".format(delay_totals['minutes_delayed_carrier']/delay_totals['delays_carrier']) + " minutes.")
+    print("The average time a flight is late for aircraft delays is "+ "{:.2f}".format(delay_totals['minutes_delayed_late_aircraft']/delay_totals['delays_late_aircraft']) + " minutes.")
+    print("The average time a flight is late for national aviation system delays is "+ "{:.2f}".format(delay_totals['minutes_delayed_national_aviation_system']/delay_totals['delays_national_aviation_system']) + " minutes.")
+    print("The average time a flight is late for security delays is "+ "{:.2f}".format(delay_totals['minutes_delayed_security']/delay_totals['delays_security']) + " minutes.")
+    print("The average time a flight is late for weather delays is "+ "{:.2f}".format(delay_totals['minutes_delayed_weather']/delay_totals['delays_weather']) + " minutes.")
+
+def most_frequent_delay_type_by_airport():
+    query = """
+            select airport_code,
+            sum(delays_carrier) as delays_carrier,
+            sum(delays_late_aircraft) as delays_late_aircraft,
+            sum(delays_national_aviation_system) as delays_national_aviation_system,
+            sum(delays_security) as delays_security,
+            sum(delays_weather) as delays_weather
+            from statistics
+            group by airport_code
+            order by airport_code ASC;
+            """
+    cursor.execute(query)
+    airports = cursor.fetchall()
+    for airport in airports:
+        reasons = {'Carrier': airport['delays_carrier'], 
+                   'Late Aircraft': airport['delays_late_aircraft'],
+                   'National Aviation System': airport['delays_national_aviation_system'],
+                   'Security': airport['delays_security'],
+                   'Weather': airport['delays_weather'],}
+        most_frequent_key = max(zip(reasons.values(), reasons.keys()))[1]
+        print(f"The most frequent reason for delays at {airport['airport_code']} is {most_frequent_key}.")
+    query = """
+            select
+            sum(delays_carrier) as "Carrier",
+            sum(delays_late_aircraft) as "Late Aircraft",
+            sum(delays_national_aviation_system) as "National Aviation System",
+            sum(delays_security) as "Security",
+            sum(delays_weather) as "Weather"
+            from statistics
+            """
+    cursor.execute(query)
+    total_reasons = cursor.fetchone()
+    most_frequent_key = max(zip(total_reasons.values(), total_reasons.keys()))[1]
+    print(f"The most frequent reason for delays across all airports is {most_frequent_key}.")
 
 
 
+# TODO: perform analysis on data using DB
+def analyze_data():
+    # do analytics
+    # get_extreme_rates()
+    # plot_flight_data_by_year(2014)
+    # numerical month (1=january, etc)
+    # plot_flight_data_by_year(12)
+    # best_and_worst_airports()
+    #average_delay_times()
+    most_frequent_delay_type_by_airport()
+    # is delta actually the most delayed airline?
 
 
 
