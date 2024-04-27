@@ -80,49 +80,45 @@ def get_extreme_rates():
     # find overall worst and best delay and cancellation rates by month and airport
     cancelled_rates = {}
     delayed_rates = {}
-    cursor.execute("SELECT airport_code, time_label, flights_cancelled, flights_delayed, flights_total FROM statistics")
+    cursor.execute("SELECT airport_code, time_label, time.month_name, time.year, flights_cancelled, flights_delayed, flights_total FROM statistics JOIN time ON time_label = time.label")
     result = cursor.fetchall()
     for res in result:
-        key = f"{res['airport_code']} {res['time_label']}"
+        key = f"{res['airport_code']} {res['month_name']} {res['year']}"
         cancelled_rates[key] = res['flights_cancelled']/res['flights_total']
         delayed_rates[key] = res['flights_delayed']/res['flights_total']
     crs = list(cancelled_rates.values())
     idx = np.argmax(crs)
     max_c_airport = list(cancelled_rates.keys())[idx]
-    print(max_c_airport)
-    print("Max cancellation rate was "+ str(max(crs))+ "%")
+    print("The month and airport with the highest flight cancellation rate was "+ max_c_airport[0:3] + " in " + max_c_airport[4:] + " with " + "{:.2%}".format(max(crs)) + " of flights being cancelled.")
     drs = list(delayed_rates.values())
     idx = np.argmax(drs)
     max_d_airport = list(delayed_rates.keys())[idx]
-    print(max_d_airport)
-    print("Max delay rate was "+ str(max(drs))+ "%")
+    print("The month and airport with the highest flight delay rate was "+ max_d_airport[0:3] + " in " + max_d_airport[4:] + " with " + "{:.2%}".format(max(drs)) + " of flights being delayed.")
     idx = np.argmin(crs)
     min_c_airport = list(cancelled_rates.keys())[idx]
-    print(min_c_airport)
-    print("Min cancellation rate was "+ str(min(crs))+ "%")
+    print("The month and airport with the lowest flight cancellation rate was "+ min_c_airport[0:3] + " in " + min_c_airport[4:] + " with " + "{:.2%}".format(min(crs)) + " of flights being cancelled.")
     idx = np.argmin(drs)
     min_d_airport = list(delayed_rates.keys())[idx]
-    print(min_d_airport)
-    print("Min delay rate was "+ str(min(drs))+ "%")
-    cursor.execute(f"SELECT * FROM statistics WHERE airport_code LIKE '{min_c_airport[0:3]}' AND time_label LIKE '{min_c_airport[4:]}'")
-    stats = cursor.fetchone()
-    print(stats['flights_cancelled'])
-    print(stats['flights_total'])
+    print("The month and airport with the lowest flight delay rate was "+ min_d_airport[0:3] + " in " + min_d_airport[4:] + " with " + "{:.2%}".format(min(drs)) + " of flights being delayed.")
+    # cursor.execute(f"SELECT * FROM statistics WHERE airport_code LIKE '{min_c_airport[0:3]}' AND time_label LIKE '{min_c_airport[4:]}'")
+    # stats = cursor.fetchone()
+    # print(stats['flights_cancelled'])
+    # print(stats['flights_total'])
 
 def plot_flight_data_by_year(year):
-    cursor.execute(f"""SELECT airport_code, time_label, flights_cancelled, flights_delayed FROM statistics JOIN time on statistics.time_label = time.label WHERE time.year = {year}""")
+    cursor.execute(f"""SELECT airport_code, time.month_name, time_label, flights_cancelled, flights_delayed FROM statistics JOIN time on statistics.time_label = time.label WHERE time.year = {year} ORDER BY time.month""")
     stats = cursor.fetchall()
     dels = {}
     cancels = {}
     for stat in stats:
-        if stat['time_label'] not in dels:
-            dels[stat['time_label']] = stat['flights_delayed']
+        if stat['month_name'] not in dels:
+            dels[stat['month_name']] = stat['flights_delayed']
         else:
-            dels[stat['time_label']] += stat['flights_delayed']
-        if stat['time_label'] not in cancels:
-            cancels[stat['time_label']] = stat['flights_cancelled']
+            dels[stat['month_name']] += stat['flights_delayed']
+        if stat['month_name'] not in cancels:
+            cancels[stat['month_name']] = stat['flights_cancelled']
         else:
-            cancels[stat['time_label']] += stat['flights_cancelled']
+            cancels[stat['month_name']] += stat['flights_cancelled']
     # make dicts into lists to be put into grouped bar chart
     labels = list(dels.keys())
     bars = {
@@ -146,15 +142,16 @@ def plot_flight_data_by_year(year):
     ax.set_title(f'Delays and Cancellations per Month in {year}')
     ax.set_xticks(x + width, labels)
     ax.legend(loc='upper left')
-    ax.set_ylim(0, max(max(bars['Delays']), max(bars['Cancellations']))+ 1000)
+    ax.set_ylim(0, max(max(bars['Delays']), max(bars['Cancellations']))+ 10000)
 
     plt.show()
 
 def plot_flight_data_by_month(month):
-    cursor.execute(f"""SELECT airport_code, time_label, flights_cancelled, flights_delayed, time.year FROM statistics JOIN time on statistics.time_label = time.label WHERE time.month = {month}""")
+    cursor.execute(f"""SELECT airport_code, time.month_name, time_label, flights_cancelled, flights_delayed, time.year FROM statistics JOIN time on statistics.time_label = time.label WHERE time.month = {month} ORDER BY time.year""")
     statistics = cursor.fetchall()
     dels = {}
     cancels = {}
+    month_name = statistics[0]['month_name']
     for stat in statistics:
         if stat['year'] not in dels:
             dels[stat['year']] = stat['flights_delayed']
@@ -185,10 +182,10 @@ def plot_flight_data_by_month(month):
     # Add some text for labels, title and custom x-axis tick labels, etc.
     ax.set_ylabel('Number of delayed/cancelled flights')
     ax.set_xlabel('Year')
-    ax.set_title('Delays and Cancellations in December by Year')
+    ax.set_title(f'Delays and Cancellations in {month_name} by Year')
     ax.set_xticks(x + width, labels)
     ax.legend(loc='upper left')
-    ax.set_ylim(0, max(max(bars['Delays']), max(bars['Cancellations']))+ 1000)
+    ax.set_ylim(0, max(max(bars['Delays']), max(bars['Cancellations']))+ 10000)
 
     plt.show()
 
@@ -265,19 +262,86 @@ def most_frequent_delay_type_by_airport():
     most_frequent_key = max(zip(total_reasons.values(), total_reasons.keys()))[1]
     print(f"The most frequent reason for delays across all airports is {most_frequent_key}.")
 
+def compare_delta():
+    # this function aims to see if rate of delays at the airports that fly delta are significantly more than airports that do not
+    query = """
+            select 
+            flights_delayed as total_delays,
+            minutes_delayed_total as total_minutes,
+            flights_total as total_flights
+            from statistics
+            where carriers_names LIKE '%Delta%'
+            """
+    anti_query = """
+            select 
+            flights_delayed as total_delays,
+            minutes_delayed_total as total_minutes,
+            flights_total as total_flights
+            from statistics
+            where carriers_names NOT LIKE '%Delta%'
+            """
+    cursor.execute(query)
+    delta = cursor.fetchall()
+    cursor.execute(anti_query)
+    non_delta = cursor.fetchall()
+    delta_num_delays = []
+    delta_min_delayed = []
+    for d in delta:
+        delta_num_delays.append(d['total_delays']/d['total_flights'])
+        delta_min_delayed.append(d['total_minutes']/d['total_delays'])
+    non_delta_num_delays = []
+    non_delta_min_delayed = []
+    for nd in non_delta:
+        non_delta_num_delays.append(nd['total_delays']/nd['total_flights'])
+        non_delta_min_delayed.append(nd['total_minutes']/nd['total_delays'])
+    # print(np.average(delta_num_delays))
+    # print(np.average(non_delta_num_delays))
+    # print(np.average(delta_min_delayed))
+    # print(np.average(non_delta_min_delayed))
 
+    # delta_rate = delta['total_minutes']/delta['total_delays']
+    # non_delta_rate = non_delta['total_minutes']/non_delta['total_delays']
+    # print(delta_rate)
+    # print(non_delta_rate)
+    result = stats.ttest_ind(delta_num_delays, non_delta_num_delays, alternative="greater")
+    result2 = stats.ttest_ind(delta_min_delayed, non_delta_min_delayed, alternative="greater")
+    print("The p-value is: " + str(result.pvalue))
+    if result.pvalue < 0.05:
+        print("The result is significantly significant. The p-value is < 0.05, therefore the increased number of delayed flights where Delta was a carrier is likely not by chance.")
+    else:
+        print("The result is not significantly significant. The p-value is > 0.05, therefore the increased number of delayed flights where Delta was a carrier is likely by chance.")
+    print("The p-value is: " + str(result2.pvalue))
+    if result2.pvalue < 0.05:
+        print("The result is significantly significant. The p-value is < 0.05, therefore the increased number of minutes that flights were delayed by where Delta was a carrier is likely not by chance.")
+    else:
+        print("The result is significantly significant. The p-value is > 0.05, therefore the increased number of minutes that flights were delayed by where Delta was a carrier is likely by chance.")
+
+        
 
 # TODO: perform analysis on data using DB
 def analyze_data():
     # do analytics
-    # get_extreme_rates()
-    # plot_flight_data_by_year(2014)
+    print("Best and worst flight delay and cancellation rates by airport and month:")
+    get_extreme_rates()
+    print()
+    print("Plotting flight data...")
+    plot_flight_data_by_year(2008)
+    print("Plotting flight data...")
     # numerical month (1=january, etc)
-    # plot_flight_data_by_year(12)
-    # best_and_worst_airports()
-    #average_delay_times()
+    plot_flight_data_by_month(11)
+    print()
+    print("Best and worst airports with on-time flights all-time:")
+    best_and_worst_airports()
+    print()
+    print("Average delay times by reason for delay:")
+    average_delay_times()
+    print()
+    print("Most frequent delay type by airport:")
     most_frequent_delay_type_by_airport()
+    print()
+    print("Does Delta actually delay more than other airlines?")
     # is delta actually the most delayed airline?
+    compare_delta()
 
 
 
